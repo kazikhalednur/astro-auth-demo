@@ -1,105 +1,147 @@
 # Astro + Supabase authentication
 
-Passwordless magic-link sign-in, email/password auth, and a protected dashboard. Built with Astro SSR and Supabase Auth (+ Postgres for one-time tokens and rate limits).
+Small SSR auth demo: **magic link**, **email + password**, and a **protected dashboard**.
 
-## Requirements
+Stack: [Astro](https://astro.build) (Node adapter) + [Supabase](https://supabase.com) Auth and Postgres.
 
-- Node.js 22.12+
-- A Supabase project (local CLI or a free cloud project)
-- npm
+> Styling is intentionally minimal — plain HTML forms. The focus is auth behaviour, security, and code quality.
 
-## Setup
-
-### 1. Install dependencies
+## Quick start (local Supabase)
 
 ```sh
 npm install
-```
-
-### 2. Configure environment
-
-```sh
 cp .env.example .env
-```
 
-Fill in `.env`:
-
-| Variable | Notes |
-| --- | --- |
-| `SUPABASE_URL` | Project Settings → API → Project URL |
-| `SUPABASE_ANON_KEY` | Project Settings → API → `anon` `public` |
-| `SUPABASE_SERVICE_ROLE_KEY` | Project Settings → API → `service_role` (server only — never expose in the browser) |
-| `MAGIC_LINK_SECRET` | Long random string used to HMAC-sign magic-link / reset tokens |
-| `MAGIC_LINK_EXPIRY_SECONDS` | Token lifetime (default `900`) |
-| `PUBLIC_SITE_URL` | Public origin of this app, e.g. `http://localhost:4321` |
-| `SMTP_*` / `EMAIL_FROM` | Required only for non-local Supabase; locally, auth emails are printed to the console |
-
-### 3. Apply the database migration
-
-The app stores used/issued auth tokens and rate-limit counters in Postgres:
-
-```sh
-# Local Supabase
 npx supabase start
-npx supabase db reset   # applies supabase/migrations/*
+npx supabase status   # copy API URL, anon key, service_role key into .env
+npx supabase db reset # applies migrations in supabase/migrations/
 
-# Or against a linked cloud project
-npx supabase db push
-```
+# Generate a signing secret, then put it in .env as MAGIC_LINK_SECRET
+node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
 
-You can also paste `supabase/migrations/20260725090000_auth_support.sql` into the Supabase SQL editor.
-
-### 4. Local Supabase keys
-
-```sh
-npx supabase status
-```
-
-Copy `API URL`, `anon key`, and `service_role key` into `.env`.
-
-### 5. Run the app
-
-```sh
 npm run dev
 ```
 
 Open [http://localhost:4321](http://localhost:4321).
 
-**Magic links (local):** when you request a magic link or password reset, the link is printed in the terminal running `astro dev`.
+Auth emails (magic link / password reset) are **printed in the terminal** when `SUPABASE_URL` points at localhost — no SMTP needed.
 
-## Auth flows
+## Requirements
 
-| Path | Purpose |
+- Node.js **22.12+**
+- npm
+- Either:
+  - [Supabase CLI](https://supabase.com/docs/guides/cli) for local development, or
+  - a free Supabase cloud project
+
+## Environment variables
+
+Copy `.env.example` → `.env` and fill in:
+
+| Variable | Required | Description |
+| --- | --- | --- |
+| `SUPABASE_URL` | yes | Project URL (local: from `supabase status`) |
+| `SUPABASE_ANON_KEY` | yes | Anon / public key |
+| `SUPABASE_SERVICE_ROLE_KEY` | yes | Service role key — **server only**, never expose in the browser |
+| `MAGIC_LINK_SECRET` | yes | Long random string used to HMAC-sign magic-link and reset tokens |
+| `MAGIC_LINK_EXPIRY_SECONDS` | no | Token lifetime in seconds (default `900`) |
+| `PUBLIC_SITE_URL` | yes | Public origin of this app (`http://localhost:4321` in dev) |
+| `SMTP_HOST` | cloud only | SMTP host for sending auth emails |
+| `SMTP_PORT` | cloud only | Usually `587` |
+| `SMTP_USER` / `SMTP_PASS` | cloud only | SMTP credentials (if required by your provider) |
+| `EMAIL_FROM` | cloud only | From address, e.g. `Auth Demo <noreply@example.com>` |
+
+## Database migration
+
+The app uses two small Postgres tables (one-time tokens + rate limits):
+
+- `magic_link_tokens`
+- `auth_rate_limits`
+
+**Local**
+
+```sh
+npx supabase start
+npx supabase db reset
+```
+
+**Cloud**
+
+```sh
+npx supabase db push
+```
+
+Or paste `supabase/migrations/20260725090000_auth_support.sql` into the Supabase SQL editor.
+
+## Cloud Supabase notes
+
+1. Apply the migration (above).
+2. Set SMTP vars in `.env` (or auth emails will fail outside local mode).
+3. Set `PUBLIC_SITE_URL` to the URL where the app is reachable.
+4. For a smooth local-style flow, disable **Confirm email** under  
+   Authentication → Providers → Email  
+   (otherwise new users must confirm before password sign-in works).
+
+Magic links in this app are **custom** (HMAC tokens + your SMTP/console). They do not rely on Supabase’s built-in magic-link email templates.
+
+## What to try
+
+| Action | Where |
 | --- | --- |
-| `/register` | Email + password registration |
-| `/signin` | Email + password, or request a magic link |
-| `/api/auth/verify` | Consumes a magic-link token and creates a session |
-| `/forgot-password` / `/reset-password` | Password reset via emailed one-time link |
-| `/set-password` | Logged-in users (e.g. magic-link-first) can set a password |
-| `/dashboard` | Protected page — requires a valid session |
-| `/api/auth/signout` | Revokes the Supabase session and clears cookies |
+| Register with email + password | `/register` |
+| Sign in with email + password | `/signin` |
+| Request a magic link | `/signin` → “Email me a login link” |
+| Open a protected page | `/dashboard` (redirects to sign-in if logged out) |
+| Forgot password | `/forgot-password` |
+| Set a password after magic-link login | `/set-password` (prompted from the dashboard) |
+| Sign out | Dashboard → Sign out |
 
-## Production build
+## Project layout
 
-This project uses the `@astrojs/node` standalone adapter:
+```text
+src/
+  lib/                 # cookies, CSRF, email, magic-link, rate-limit, supabase, validation
+  middleware.js        # session restore + route protection
+  pages/
+    index.astro
+    signin.astro
+    register.astro
+    dashboard.astro    # protected
+    forgot-password.astro
+    reset-password.astro
+    set-password.astro # protected
+    api/auth/          # signin, register, magic-link, verify, signout, …
+supabase/
+  migrations/          # auth support tables
+```
+
+## Scripts
+
+| Command | Action |
+| --- | --- |
+| `npm run dev` | Dev server at `http://localhost:4321` |
+| `npm run build` | Production build (`dist/`) |
+| `npm run preview` | Preview the production build |
+
+## Production
 
 ```sh
 npm run build
 node ./dist/server/entry.mjs
 ```
 
-Set `PUBLIC_SITE_URL` to your real origin, configure SMTP, and use HTTPS so `Secure` cookies apply (`PROD`).
+Uses `@astrojs/node` in standalone mode. For a real deploy:
 
-## Security notes (intentional choices)
+- set `PUBLIC_SITE_URL` to your public origin
+- configure SMTP
+- serve over HTTPS so `Secure` session cookies apply
 
-- Session cookies are `httpOnly`, `SameSite=Lax`, and `Secure` in production.
-- Auth forms include a CSRF token checked on POST.
-- Magic-link / reset tokens are HMAC-signed, expiring, and one-time (persisted in `magic_link_tokens`).
-- Auth endpoints are rate-limited per email via `auth_rate_limits`.
-- Password sign-in failures use a generic message (no email enumeration).
-- Forgot-password always shows the same success message whether or not the email exists.
-- The service role key stays on the server only.
+## Security choices
 
-## GitHub access for review
-
-Invite `stijnvanpeer@peerfect.be` as a collaborator on the repository once you are ready for review.
+- Session cookies: `httpOnly`, `SameSite=Lax`, `Secure` in production
+- CSRF token on auth form POSTs
+- Magic-link / reset tokens: HMAC-signed, expiring, one-time (stored in Postgres)
+- Per-email rate limits on sensitive auth endpoints
+- Generic error on failed password sign-in (no email enumeration)
+- Forgot-password always shows the same success message
+- Service role key used only on the server
