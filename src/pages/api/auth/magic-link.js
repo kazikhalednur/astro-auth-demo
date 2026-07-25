@@ -1,7 +1,10 @@
 export const prerender = false;
 
-import { createMagicLinkToken } from "../../../lib/magic-link";
 import { sendMagicLinkEmail } from "../../../lib/email";
+import {
+  buildMagicLinkUrl,
+  createMagicLinkToken,
+} from "../../../lib/magic-link";
 
 export const POST = async ({ request, redirect }) => {
   const formData = await request.formData();
@@ -13,11 +16,7 @@ export const POST = async ({ request, redirect }) => {
 
   try {
     const token = createMagicLinkToken(email);
-    const siteUrl = (
-      import.meta.env.PUBLIC_SITE_URL || "http://localhost:4321"
-    ).replace(/\/$/, "");
-    const magicLink = `${siteUrl}/api/auth/verify?token=${encodeURIComponent(token)}`;
-
+    const magicLink = buildMagicLinkUrl(token);
     await sendMagicLinkEmail({ to: email.toLowerCase(), magicLink });
   } catch (error) {
     console.error("Failed to send magic link:", error);
