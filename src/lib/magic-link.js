@@ -2,6 +2,18 @@ import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 
 const usedJtis = new Set();
 
+export class MagicLinkExpiredError extends Error {
+  /**
+   * @param {string} email
+   */
+  constructor(email) {
+    super("Magic link has expired");
+    this.name = "MagicLinkExpiredError";
+    this.code = "MAGIC_LINK_EXPIRED";
+    this.email = email;
+  }
+}
+
 function getSecret() {
   const secret = import.meta.env.MAGIC_LINK_SECRET;
   if (!secret) {
@@ -12,8 +24,8 @@ function getSecret() {
 
 function getExpirySeconds() {
   const raw = import.meta.env.MAGIC_LINK_EXPIRY_SECONDS;
-  const parsed = Number.parseInt(raw || "900", 10);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : 900;
+  const parsed = Number.parseInt(raw || "300", 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 300;
 }
 
 function base64UrlEncode(value) {
@@ -47,7 +59,20 @@ export function createMagicLinkToken(email) {
 }
 
 /**
+ * Build the absolute magic-link URL for a token.
+ * @param {string} token
+ * @returns {string}
+ */
+export function buildMagicLinkUrl(token) {
+  const siteUrl = (
+    import.meta.env.PUBLIC_SITE_URL || "http://localhost:4321"
+  ).replace(/\/$/, "");
+  return `${siteUrl}/api/auth/verify?token=${encodeURIComponent(token)}`;
+}
+
+/**
  * Verify a magic-link token. Throws if invalid, expired, or already used.
+ * Expired tokens throw MagicLinkExpiredError with the email so a new link can be sent.
  * @param {string} token
  * @returns {{ email: string, jti: string, exp: number }}
  */
@@ -85,7 +110,7 @@ export function verifyMagicLinkToken(token) {
   }
 
   if (payload.exp < Math.floor(Date.now() / 1000)) {
-    throw new Error("Magic link has expired");
+    throw new MagicLinkExpiredError(payload.email);
   }
 
   if (usedJtis.has(payload.jti)) {
