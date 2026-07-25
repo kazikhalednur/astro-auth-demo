@@ -10,22 +10,34 @@ const passwordSet = Astro.url.searchParams.get("password_set");
 ---
 
 <Layout title="Dashboard">
-  <h1>Welcome {email}</h1>
-  <p>This page is only available when you are signed in.</p>
+  <div class="page-hero">
+    <h1>Welcome</h1>
+    <p>{email}</p>
+  </div>
 
-  {passwordSet && <p>Your password has been saved. You can now sign in with email and password.</p>}
+  {passwordSet && (
+    <p class="alert alert-ok">
+      Your password has been saved. You can now sign in with email and password.
+    </p>
+  )}
 
   {needsPassword && !passwordSet && (
-    <p>
+    <p class="alert alert-info">
       You signed in with a magic link and do not have a password yet.
       <a href="/set-password">Set a password</a> so you can also use email and password next time.
     </p>
   )}
 
-  <p><a href="/">Home</a></p>
-
-  <form action="/api/auth/signout" method="post">
-    <input type="hidden" name="csrf" value={csrf} />
-    <button type="submit">Sign out</button>
-  </form>
+  <div class="panel">
+    <p class="panel-copy">
+      This page is only available when you are signed in.
+    </p>
+    <div class="actions">
+      <a class="btn btn-ghost" href="/">Home</a>
+      <form class="inline-form" action="/api/auth/signout" method="post">
+        <input type="hidden" name="csrf" value={csrf} />
+        <button type="submit">Sign out</button>
+      </form>
+    </div>
+  </div>
 </Layout>
