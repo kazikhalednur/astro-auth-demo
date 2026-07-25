@@ -1,0 +1,1 @@
+-- No seed data required for the auth demo.
