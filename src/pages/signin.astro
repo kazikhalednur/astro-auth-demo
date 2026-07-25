@@ -1,16 +1,43 @@
 ---
 export const prerender = false;
 import Layout from "../layouts/Layout.astro";
+
+const magicSent = Astro.url.searchParams.get("magic") === "sent";
+const error = Astro.url.searchParams.get("error");
+
+const errorMessages = {
+  email_required: "Email is required.",
+  magic_link_failed: "Could not send the magic link. Try again.",
+  invalid_or_expired_link: "That magic link is invalid or has expired.",
+};
 ---
 
 <Layout title="Sign in">
   <h1>Sign in</h1>
   <p>New here? <a href="/register">Create an account</a></p>
+
+  {magicSent && (
+    <p>
+      Check your email for the login link. If you are using local Supabase, check
+      the dev server console.
+    </p>
+  )}
+
+  {error && <p>{errorMessages[error] || "Something went wrong."}</p>}
+
+  <h2>Email and password</h2>
   <form action="/api/auth/signin" method="post">
     <label for="email">Email</label>
-    <input type="email" name="email" id="email" />
+    <input type="email" name="email" id="email" required />
     <label for="password">Password</label>
-    <input type="password" name="password" id="password" />
+    <input type="password" name="password" id="password" required />
     <button type="submit">Login</button>
+  </form>
+
+  <h2>Magic link</h2>
+  <form action="/api/auth/magic-link" method="post">
+    <label for="magic-email">Email</label>
+    <input type="email" name="email" id="magic-email" required />
+    <button type="submit">Email me a login link</button>
   </form>
 </Layout>
