@@ -1,16 +1,17 @@
 import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
-
-const usedJtis = new Set();
+import { supabaseAdmin } from "./supabase";
 
 export class MagicLinkExpiredError extends Error {
   /**
    * @param {string} email
+   * @param {string} [purpose]
    */
-  constructor(email) {
+  constructor(email, purpose = "magic_link") {
     super("Magic link has expired");
     this.name = "MagicLinkExpiredError";
     this.code = "MAGIC_LINK_EXPIRED";
     this.email = email;
+    this.purpose = purpose;
   }
 }
 
@@ -23,9 +24,17 @@ function getSecret() {
 }
 
 function getExpirySeconds() {
-  const raw = import.meta.env.MAGIC_LINK_EXPIRY_SECONDS;
-  const parsed = Number.parseInt(raw || "300", 10);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : 300;
+  // Prefer process.env so .env edits are not stuck behind a stale Vite inline.
+  const raw =
+    process.env.MAGIC_LINK_EXPIRY_SECONDS ||
+    import.meta.env.MAGIC_LINK_EXPIRY_SECONDS ||
+    "900";
+  const parsed = Number.parseInt(String(raw).trim(), 10);
+  // Ignore zero/negative/absurdly short values from misconfiguration.
+  if (!Number.isFinite(parsed) || parsed < 60) {
+    return 900;
+  }
+  return parsed;
 }
 
 function base64UrlEncode(value) {
@@ -41,17 +50,26 @@ function sign(payload) {
 }
 
 /**
- * Create a signed, expiring magic-link token for an email.
  * @param {string} email
- * @returns {string}
+ * @param {"magic_link" | "password_reset"} [purpose]
+ * @returns {Promise<string>}
  */
-export function createMagicLinkToken(email) {
+export async function createSignedAuthToken(email, purpose = "magic_link") {
   const normalizedEmail = email.trim().toLowerCase();
-  const payload = {
+  const exp = Math.floor(Date.now() / 1000) + getExpirySeconds();
+  const jti = randomBytes(16).toString("hex");
+  const payload = { email: normalizedEmail, exp, jti, purpose };
+
+  const { error } = await supabaseAdmin.from("magic_link_tokens").insert({
+    jti,
     email: normalizedEmail,
-    exp: Math.floor(Date.now() / 1000) + getExpirySeconds(),
-    jti: randomBytes(16).toString("hex"),
-  };
+    purpose,
+    expires_at: new Date(exp * 1000).toISOString(),
+  });
+
+  if (error) {
+    throw error;
+  }
 
   const encodedPayload = base64UrlEncode(JSON.stringify(payload));
   const signature = sign(encodedPayload);
@@ -59,7 +77,22 @@ export function createMagicLinkToken(email) {
 }
 
 /**
- * Build the absolute magic-link URL for a token.
+ * @param {string} email
+ * @returns {Promise<string>}
+ */
+export function createMagicLinkToken(email) {
+  return createSignedAuthToken(email, "magic_link");
+}
+
+/**
+ * @param {string} email
+ * @returns {Promise<string>}
+ */
+export function createPasswordResetToken(email) {
+  return createSignedAuthToken(email, "password_reset");
+}
+
+/**
  * @param {string} token
  * @returns {string}
  */
@@ -71,12 +104,22 @@ export function buildMagicLinkUrl(token) {
 }
 
 /**
- * Verify a magic-link token. Throws if invalid, expired, or already used.
- * Expired tokens throw MagicLinkExpiredError with the email so a new link can be sent.
  * @param {string} token
- * @returns {{ email: string, jti: string, exp: number }}
+ * @returns {string}
  */
-export function verifyMagicLinkToken(token) {
+export function buildPasswordResetUrl(token) {
+  const siteUrl = (
+    import.meta.env.PUBLIC_SITE_URL || "http://localhost:4321"
+  ).replace(/\/$/, "");
+  return `${siteUrl}/reset-password?token=${encodeURIComponent(token)}`;
+}
+
+/**
+ * Parse and cryptographically verify a token without consuming the JTI.
+ * @param {string} token
+ * @returns {{ email: string, jti: string, exp: number, purpose: string }}
+ */
+function parseSignedToken(token) {
   if (!token || typeof token !== "string" || !token.includes(".")) {
     throw new Error("Invalid magic link token");
   }
@@ -97,7 +140,7 @@ export function verifyMagicLinkToken(token) {
     throw new Error("Invalid magic link signature");
   }
 
-  /** @type {{ email?: string, exp?: number, jti?: string }} */
+  /** @type {{ email?: string, exp?: number, jti?: string, purpose?: string }} */
   let payload;
   try {
     payload = JSON.parse(base64UrlDecode(encodedPayload));
@@ -109,15 +152,119 @@ export function verifyMagicLinkToken(token) {
     throw new Error("Invalid magic link payload");
   }
 
+  const purpose = payload.purpose || "magic_link";
+
   if (payload.exp < Math.floor(Date.now() / 1000)) {
-    throw new MagicLinkExpiredError(payload.email);
+    throw new MagicLinkExpiredError(payload.email, purpose);
   }
 
-  if (usedJtis.has(payload.jti)) {
-    throw new Error("Magic link has already been used");
+  return {
+    email: payload.email,
+    jti: payload.jti,
+    exp: payload.exp,
+    purpose,
+  };
+}
+
+/**
+ * Atomically mark a JTI as used. Returns false if missing, expired in DB, or already used.
+ * @param {string} jti
+ * @param {string} purpose
+ * @returns {Promise<boolean>}
+ */
+async function consumeJti(jti, purpose) {
+  const now = new Date().toISOString();
+  const { data, error } = await supabaseAdmin
+    .from("magic_link_tokens")
+    .update({ used_at: now })
+    .eq("jti", jti)
+    .eq("purpose", purpose)
+    .is("used_at", null)
+    .gt("expires_at", now)
+    .select("jti")
+    .maybeSingle();
+
+  if (error) {
+    throw error;
   }
 
-  usedJtis.add(payload.jti);
+  return Boolean(data?.jti);
+}
+
+/**
+ * Verify a magic-link token and consume its one-time JTI.
+ * @param {string} token
+ * @returns {Promise<{ email: string, jti: string, exp: number }>}
+ */
+export async function verifyMagicLinkToken(token) {
+  const payload = parseSignedToken(token);
+
+  if (payload.purpose !== "magic_link") {
+    throw new Error("Invalid magic link purpose");
+  }
+
+  const consumed = await consumeJti(payload.jti, "magic_link");
+  if (!consumed) {
+    throw new Error("Magic link has already been used or is invalid");
+  }
+
+  return {
+    email: payload.email,
+    jti: payload.jti,
+    exp: payload.exp,
+  };
+}
+
+/**
+ * Verify a password-reset token and consume its one-time JTI.
+ * @param {string} token
+ * @returns {Promise<{ email: string, jti: string, exp: number }>}
+ */
+export async function verifyPasswordResetToken(token) {
+  const payload = parseSignedToken(token);
+
+  if (payload.purpose !== "password_reset") {
+    throw new Error("Invalid password reset purpose");
+  }
+
+  const consumed = await consumeJti(payload.jti, "password_reset");
+  if (!consumed) {
+    throw new Error("Password reset link has already been used or is invalid");
+  }
+
+  return {
+    email: payload.email,
+    jti: payload.jti,
+    exp: payload.exp,
+  };
+}
+
+/**
+ * Peek at a password-reset token without consuming it (for rendering the form).
+ * @param {string} token
+ * @returns {Promise<{ email: string, jti: string, exp: number }>}
+ */
+export async function peekPasswordResetToken(token) {
+  const payload = parseSignedToken(token);
+  if (payload.purpose !== "password_reset") {
+    throw new Error("Invalid password reset purpose");
+  }
+
+  const { data, error } = await supabaseAdmin
+    .from("magic_link_tokens")
+    .select("used_at")
+    .eq("jti", payload.jti)
+    .eq("purpose", "password_reset")
+    .maybeSingle();
+
+  if (error) {
+    throw error;
+  }
+
+  if (!data || data.used_at) {
+    throw new Error("Password reset link has already been used or is invalid");
+  }
+
   return {
     email: payload.email,
     jti: payload.jti,
