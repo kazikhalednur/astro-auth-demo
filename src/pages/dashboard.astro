@@ -1,13 +1,31 @@
 ---
 export const prerender = false;
 import Layout from "../layouts/Layout.astro";
+import { ensureCsrfToken } from "../lib/csrf";
 
+const csrf = ensureCsrfToken(Astro.cookies);
 const email = Astro.locals.email;
+const needsPassword = Boolean(Astro.locals.user?.user_metadata?.needs_password);
+const passwordSet = Astro.url.searchParams.get("password_set");
 ---
-<Layout title="dashboard">
+
+<Layout title="Dashboard">
   <h1>Welcome {email}</h1>
-  <p>We are happy to see you here</p>
-  <form action="/api/auth/signout">
+  <p>This page is only available when you are signed in.</p>
+
+  {passwordSet && <p>Your password has been saved. You can now sign in with email and password.</p>}
+
+  {needsPassword && !passwordSet && (
+    <p>
+      You signed in with a magic link and do not have a password yet.
+      <a href="/set-password">Set a password</a> so you can also use email and password next time.
+    </p>
+  )}
+
+  <p><a href="/">Home</a></p>
+
+  <form action="/api/auth/signout" method="post">
+    <input type="hidden" name="csrf" value={csrf} />
     <button type="submit">Sign out</button>
   </form>
 </Layout>
