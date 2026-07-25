@@ -1,15 +1,42 @@
 ---
+export const prerender = false;
 import Layout from "../layouts/Layout.astro";
+import { ensureCsrfToken } from "../lib/csrf";
+import { MIN_PASSWORD_LENGTH } from "../lib/validation";
+
+const csrf = ensureCsrfToken(Astro.cookies);
+const error = Astro.url.searchParams.get("error");
+
+const errorMessages = {
+  email_required: "Email is required.",
+  email_invalid: "Enter a valid email address.",
+  password_required: "Password is required.",
+  password_too_short: `Password must be at least ${MIN_PASSWORD_LENGTH} characters.`,
+  email_taken: "An account with that email already exists. Try signing in.",
+  register_failed: "Could not create the account. Try again.",
+  rate_limited: "Too many attempts. Please wait a few minutes and try again.",
+  csrf: "Your session expired. Please try again.",
+};
 ---
 
 <Layout title="Register">
   <h1>Register</h1>
   <p>Already have an account? <a href="/signin">Sign in</a></p>
+
+  {error && <p>{errorMessages[error] || "Something went wrong."}</p>}
+
   <form action="/api/auth/register" method="post">
+    <input type="hidden" name="csrf" value={csrf} />
     <label for="email">Email</label>
-    <input type="email" name="email" id="email" />
-    <label for="password">Password</label>
-    <input type="password" name="password" id="password" />
+    <input type="email" name="email" id="email" required />
+    <label for="password">Password (min {MIN_PASSWORD_LENGTH} characters)</label>
+    <input
+      type="password"
+      name="password"
+      id="password"
+      required
+      minlength={MIN_PASSWORD_LENGTH}
+    />
     <button type="submit">Register</button>
   </form>
 </Layout>
