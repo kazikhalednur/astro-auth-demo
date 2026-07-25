@@ -1,14 +1,25 @@
 import { createClient } from "@supabase/supabase-js";
 import { randomBytes } from "node:crypto";
 
-export const supabase = createClient(
-  import.meta.env.SUPABASE_URL,
-  import.meta.env.SUPABASE_ANON_KEY,
-);
+function env(name) {
+  return import.meta.env[name] || "";
+}
+
+/**
+ * Fresh anon client per call — avoids shared-session races under concurrent requests.
+ */
+export function createSupabaseClient() {
+  return createClient(env("SUPABASE_URL"), env("SUPABASE_ANON_KEY"), {
+    auth: {
+      autoRefreshToken: false,
+      persistSession: false,
+    },
+  });
+}
 
 export const supabaseAdmin = createClient(
-  import.meta.env.SUPABASE_URL,
-  import.meta.env.SUPABASE_SERVICE_ROLE_KEY,
+  env("SUPABASE_URL"),
+  env("SUPABASE_SERVICE_ROLE_KEY"),
   {
     auth: {
       autoRefreshToken: false,
@@ -31,7 +42,7 @@ function isExistingUserError(error) {
 
 /**
  * Find an Auth user by email, or create one with a random password.
- * Existing users keep their password unchanged.
+ * New magic-link users are flagged so they can set a password later.
  * @param {string} email
  * @returns {Promise<{ email: string, created: boolean }>}
  */
@@ -43,6 +54,7 @@ export async function ensureUserForMagicLink(email) {
     email: normalizedEmail,
     password: randomPassword,
     email_confirm: true,
+    user_metadata: { needs_password: true },
   });
 
   if (!error && data.user) {
@@ -57,11 +69,48 @@ export async function ensureUserForMagicLink(email) {
 }
 
 /**
+ * Look up a user id by email via a security-definer DB function.
+ * @param {string} email
+ * @returns {Promise<string | null>}
+ */
+export async function findUserIdByEmail(email) {
+  const normalizedEmail = email.trim().toLowerCase();
+  const { data, error } = await supabaseAdmin.rpc(
+    "find_auth_user_id_by_email",
+    { lookup_email: normalizedEmail },
+  );
+
+  if (error) {
+    throw error;
+  }
+
+  return data ?? null;
+}
+
+/**
+ * Set a password for a user and clear the needs_password flag.
+ * @param {string} userId
+ * @param {string} password
+ */
+export async function setUserPassword(userId, password) {
+  const { error } = await supabaseAdmin.auth.admin.updateUserById(userId, {
+    password,
+    user_metadata: { needs_password: false },
+  });
+
+  if (error) {
+    throw error;
+  }
+}
+
+/**
  * Create a Supabase session for an email without sending Supabase's own email.
  * @param {string} email
  * @returns {Promise<{ access_token: string, refresh_token: string }>}
  */
 export async function createSessionForEmail(email) {
+  const client = createSupabaseClient();
+
   const { data: linkData, error: linkError } =
     await supabaseAdmin.auth.admin.generateLink({
       type: "magiclink",
@@ -77,7 +126,7 @@ export async function createSessionForEmail(email) {
     throw new Error("Failed to generate session token");
   }
 
-  const { data: sessionData, error: otpError } = await supabase.auth.verifyOtp({
+  const { data: sessionData, error: otpError } = await client.auth.verifyOtp({
     token_hash: tokenHash,
     type: "magiclink",
   });
