@@ -6,16 +6,14 @@ function isLocalSupabase() {
 }
 
 /**
- * Deliver a magic login link.
- * Local Supabase: log to console.
- * Production: send via SMTP (Supabase project SMTP settings).
- * @param {{ to: string, magicLink: string }} options
+ * @param {{ to: string, subject: string, text: string, html: string }} options
  */
-export async function sendMagicLinkEmail({ to, magicLink }) {
+async function deliverEmail({ to, subject, text, html }) {
   if (isLocalSupabase()) {
-    console.log("\n========== MAGIC LINK (local Supabase) ==========");
+    console.log("\n========== AUTH EMAIL (local Supabase) ==========");
     console.log(`To: ${to}`);
-    console.log(`Link: ${magicLink}`);
+    console.log(`Subject: ${subject}`);
+    console.log(text);
     console.log("=================================================\n");
     return;
   }
@@ -39,11 +37,31 @@ export async function sendMagicLinkEmail({ to, magicLink }) {
     auth: user && pass ? { user, pass } : undefined,
   });
 
-  await transporter.sendMail({
-    from,
+  await transporter.sendMail({ from, to, subject, text, html });
+}
+
+/**
+ * Deliver a magic login link.
+ * @param {{ to: string, magicLink: string }} options
+ */
+export async function sendMagicLinkEmail({ to, magicLink }) {
+  await deliverEmail({
     to,
     subject: "Your magic sign-in link",
     text: `Sign in with this link (expires soon):\n\n${magicLink}\n`,
     html: `<p>Sign in with this link (expires soon):</p><p><a href="${magicLink}">${magicLink}</a></p>`,
+  });
+}
+
+/**
+ * Deliver a password reset link.
+ * @param {{ to: string, resetLink: string }} options
+ */
+export async function sendPasswordResetEmail({ to, resetLink }) {
+  await deliverEmail({
+    to,
+    subject: "Reset your password",
+    text: `Reset your password with this link (expires soon):\n\n${resetLink}\n\nIf you did not request this, you can ignore this email.\n`,
+    html: `<p>Reset your password with this link (expires soon):</p><p><a href="${resetLink}">${resetLink}</a></p><p>If you did not request this, you can ignore this email.</p>`,
   });
 }
