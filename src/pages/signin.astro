@@ -31,37 +31,55 @@ const errorMessages = {
 ---
 
 <Layout title="Sign in">
-  <h1>Sign in</h1>
-  <p>New here? <a href="/register">Create an account</a></p>
-  <p><a href="/forgot-password">Forgot your password?</a></p>
+  <div class="page-hero">
+    <h1>Sign in</h1>
+    <p>Welcome back. Use a password or a magic link.</p>
+  </div>
 
-  {registered && <p>Account created. You can sign in now.</p>}
-  {passwordReset && <p>Password updated. You can sign in now.</p>}
-  {signedOut && <p>You have been signed out.</p>}
-  {magic && magicMessages[magic] && <p>{magicMessages[magic]}</p>}
-  {error && <p>{errorMessages[error] || "Something went wrong."}</p>}
+  {registered && <p class="alert alert-ok">Account created. You can sign in now.</p>}
+  {passwordReset && <p class="alert alert-ok">Password updated. You can sign in now.</p>}
+  {signedOut && <p class="alert alert-info">You have been signed out.</p>}
+  {magic && magicMessages[magic] && <p class="alert alert-info">{magicMessages[magic]}</p>}
+  {error && <p class="alert alert-error">{errorMessages[error] || "Something went wrong."}</p>}
 
-  <h2>Email and password</h2>
-  <form action="/api/auth/signin" method="post">
-    <input type="hidden" name="csrf" value={csrf} />
-    <label for="email">Email</label>
-    <input type="email" name="email" id="email" required />
-    <label for="password">Password</label>
-    <input
-      type="password"
-      name="password"
-      id="password"
-      required
-      minlength={MIN_PASSWORD_LENGTH}
-    />
-    <button type="submit">Login</button>
-  </form>
+  <div class="panel">
+    <h2>Email and password</h2>
+    <form class="stack" action="/api/auth/signin" method="post">
+      <input type="hidden" name="csrf" value={csrf} />
+      <div class="field">
+        <label for="email">Email</label>
+        <input type="email" name="email" id="email" required autocomplete="email" />
+      </div>
+      <div class="field">
+        <label for="password">Password</label>
+        <input
+          type="password"
+          name="password"
+          id="password"
+          required
+          minlength={MIN_PASSWORD_LENGTH}
+          autocomplete="current-password"
+        />
+      </div>
+      <button class="btn-block" type="submit">Login</button>
+    </form>
+    <p class="meta-links">
+      <a href="/forgot-password">Forgot your password?</a>
+      · New here? <a href="/register">Create an account</a>
+    </p>
+  </div>
 
-  <h2>Magic link</h2>
-  <form action="/api/auth/magic-link" method="post">
-    <input type="hidden" name="csrf" value={csrf} />
-    <label for="magic-email">Email</label>
-    <input type="email" name="email" id="magic-email" required />
-    <button type="submit">Email me a login link</button>
-  </form>
+  <div class="divider">or</div>
+
+  <div class="panel">
+    <h2>Magic link</h2>
+    <form class="stack" action="/api/auth/magic-link" method="post">
+      <input type="hidden" name="csrf" value={csrf} />
+      <div class="field">
+        <label for="magic-email">Email</label>
+        <input type="email" name="email" id="magic-email" required autocomplete="email" />
+      </div>
+      <button class="btn-block" type="submit">Email me a login link</button>
+    </form>
+  </div>
 </Layout>
