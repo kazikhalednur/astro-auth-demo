@@ -2,8 +2,14 @@
 export const prerender = false;
 import Layout from "../layouts/Layout.astro";
 
-const magicSent = Astro.url.searchParams.get("magic") === "sent";
+const magic = Astro.url.searchParams.get("magic");
 const error = Astro.url.searchParams.get("error");
+
+const magicMessages = {
+  sent: "Check your email for the login link. If you are using local Supabase, check the dev server console.",
+  resent:
+    "That link had expired, so we sent a new one. Check your email (or the dev server console for local Supabase).",
+};
 
 const errorMessages = {
   email_required: "Email is required.",
@@ -16,12 +22,7 @@ const errorMessages = {
   <h1>Sign in</h1>
   <p>New here? <a href="/register">Create an account</a></p>
 
-  {magicSent && (
-    <p>
-      Check your email for the login link. If you are using local Supabase, check
-      the dev server console.
-    </p>
-  )}
+  {magic && magicMessages[magic] && <p>{magicMessages[magic]}</p>}
 
   {error && <p>{errorMessages[error] || "Something went wrong."}</p>}
 
