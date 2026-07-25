@@ -1,5 +1,6 @@
 export const prerender = false;
 
+import { setSessionCookies } from "../../../lib/cookies";
 import { sendMagicLinkEmail } from "../../../lib/email";
 import {
   MagicLinkExpiredError,
@@ -7,17 +8,17 @@ import {
   createMagicLinkToken,
   verifyMagicLinkToken,
 } from "../../../lib/magic-link";
+import { checkRateLimit } from "../../../lib/rate-limit";
 import {
   createSessionForEmail,
   ensureUserForMagicLink,
 } from "../../../lib/supabase";
 
 /**
- * Issue and deliver a fresh magic link for an email.
  * @param {string} email
  */
 async function resendMagicLink(email) {
-  const token = createMagicLinkToken(email);
+  const token = await createMagicLinkToken(email);
   const magicLink = buildMagicLinkUrl(token);
   await sendMagicLinkEmail({ to: email.toLowerCase(), magicLink });
 }
@@ -30,13 +31,10 @@ export const GET = async ({ url, cookies, redirect }) => {
   }
 
   try {
-    const { email } = verifyMagicLinkToken(token);
+    const { email } = await verifyMagicLinkToken(token);
     await ensureUserForMagicLink(email);
-    const { access_token, refresh_token } = await createSessionForEmail(email);
-
-    cookies.set("sb-access-token", access_token, { path: "/" });
-    cookies.set("sb-refresh-token", refresh_token, { path: "/" });
-
+    const session = await createSessionForEmail(email);
+    setSessionCookies(cookies, session);
     return redirect("/dashboard");
   } catch (error) {
     const isExpired =
@@ -44,6 +42,14 @@ export const GET = async ({ url, cookies, redirect }) => {
       error?.code === "MAGIC_LINK_EXPIRED";
 
     if (isExpired && error.email) {
+      const rate = await checkRateLimit(`magic_link:${error.email}`, {
+        limit: 5,
+        windowSeconds: 15 * 60,
+      });
+      if (!rate.allowed) {
+        return redirect("/signin?error=rate_limited");
+      }
+
       try {
         await resendMagicLink(error.email);
         return redirect("/signin?magic=resent");
