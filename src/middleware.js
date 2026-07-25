@@ -1,12 +1,20 @@
 import { defineMiddleware } from "astro:middleware";
-import { supabase } from "./lib/supabase";
+import {
+  clearSessionCookies,
+  setSessionCookies,
+} from "./lib/cookies";
+import { ensureCsrfToken } from "./lib/csrf";
+import { createSupabaseClient } from "./lib/supabase";
 
-const protectedRoutes = ["/dashboard"];
-const redirectAuthenticatedFrom = ["/signin", "/register"];
+const protectedRoutes = ["/dashboard", "/set-password"];
+const redirectAuthenticatedFrom = ["/signin", "/register", "/forgot-password"];
 
 export const onRequest = defineMiddleware(async (context, next) => {
   const { cookies, redirect, url } = context;
   const pathname = url.pathname;
+
+  // Always have a CSRF token available for forms rendered in this request.
+  ensureCsrfToken(cookies);
 
   const accessToken = cookies.get("sb-access-token");
   const refreshToken = cookies.get("sb-refresh-token");
@@ -22,14 +30,15 @@ export const onRequest = defineMiddleware(async (context, next) => {
     return next();
   }
 
+  // Per-request client so concurrent setSession calls cannot race.
+  const supabase = createSupabaseClient();
   const { data, error } = await supabase.auth.setSession({
     access_token: accessToken.value,
     refresh_token: refreshToken.value,
   });
 
   if (error || !data.session) {
-    cookies.delete("sb-access-token", { path: "/" });
-    cookies.delete("sb-refresh-token", { path: "/" });
+    clearSessionCookies(cookies);
 
     if (isProtected) {
       return redirect("/signin");
@@ -37,8 +46,10 @@ export const onRequest = defineMiddleware(async (context, next) => {
     return next();
   }
 
-  cookies.set("sb-access-token", data.session.access_token, { path: "/" });
-  cookies.set("sb-refresh-token", data.session.refresh_token, { path: "/" });
+  setSessionCookies(cookies, {
+    access_token: data.session.access_token,
+    refresh_token: data.session.refresh_token,
+  });
 
   context.locals.email = data.user?.email ?? null;
   context.locals.user = data.user;
